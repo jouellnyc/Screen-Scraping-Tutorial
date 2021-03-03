@@ -8,8 +8,8 @@
 
 #### market_sales.py 
 - Python Client to pull Rule #1 Style Stock data
-(This no longer works as the sites modified their HTML as it left for reference.
-Please see https://github.com/jouellnyc/DockerStocksWeb for getting Stock Data!)
+- This no longer works as the sites modified their HTML as it left for reference.
+- Please see https://github.com/jouellnyc/DockerStocksWeb for getting Stock Data!
 
 #### docker
 - Docker Support Files 
