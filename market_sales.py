@@ -23,36 +23,16 @@ parser.add_argument("-d", "--debug", help="debug", action="store_true")
 parser.add_argument("-p", "--plot", help="Save Plot Data", action="store_true")
 namespace = parser.parse_args(sys.argv[1:])
 
-if namespace.stock:
-    stock = namespace.stock
-else:
-    stock = "GOOG"
+stock = namespace.stock if namespace.stock else "GOOG"
 ustock = stock.upper()
 
-if namespace.keep:
-    save_data_locally = True
-else:
-    save_data_locally = False
-
-if namespace.debug:
-    debugon = True
-else:
-    debugon = False
-
-if namespace.plot:
-    plot = True
-else:
-    plot = False
-
-if namespace.mode:
-    if namespace.mode == "local":
-        web_mode = False
-    elif namespace.mode == "web":
-        web_mode = True
-else:
+save_data_locally = bool(namespace.keep)
+debugon = bool(namespace.debug)
+plot = bool(namespace.plot)
+if namespace.mode and namespace.mode == "local":
+    web_mode = False
+elif namespace.mode and namespace.mode == "web" or not namespace.mode:
     web_mode = True
-
-
 """ Globals  """
 lo_pe = 4
 hi_pe = 25
@@ -219,34 +199,26 @@ def check_data(data):
 
     if data is None:
         return None, None
-    else:
-        data_pat = re.compile("([-(]?[-(]?[0-9,]+\.?[0-9]{,3})([mMbB]?)")
-        data_is_valid = data_pat.search(data)
-        if data_is_valid:
-            num = data_is_valid.group(1)
-            denom = data_is_valid.group(2)
-            brc_pat = re.compile("\(")
-            braces = brc_pat.search(num)
-            num = num.replace("(", "")
-            num = num.replace(")", "")
-            num = num.replace(",", "")
+    data_pat = re.compile("([-(]?[-(]?[0-9,]+\.?[0-9]{,3})([mMbB]?)")
+    if not (data_is_valid := data_pat.search(data)):
+        return mynan, mynan
+    num = data_is_valid[1]
+    denom = data_is_valid[2]
+    brc_pat = re.compile("\(")
+    braces = brc_pat.search(num)
+    num = num.replace("(", "")
+    num = num.replace(")", "")
+    num = num.replace(",", "")
 
-            if denom:
-                denom_val = denom
-            else:
-                denom_val = mynan
-
-            if braces:
-                neg_pat = re.compile("-")
-                is_neg_already = neg_pat.search(num)
-                if is_neg_already:
-                    return float(num), denom_val
-                else:
-                    return -float(num), denom_val
-            else:
-                return float(num), denom_val
-        else:
-            return mynan, mynan
+    denom_val = denom if denom else mynan
+    if not braces:
+        return float(num), denom_val
+    neg_pat = re.compile("-")
+    return (
+        (float(num), denom_val)
+        if (is_neg_already := neg_pat.search(num))
+        else (-float(num), denom_val)
+    )
 
 
 def check_growth_rate(data_name, data_master, denom_master, years):
@@ -362,13 +334,11 @@ def get_years_rev_ninc_eps(soup_sales_ninc_eps):
         max = 5
         for tag in years_links:
             year_raw_data = tag.string
-            if year_raw_data is not None:
-                match = re.search("20[0-9][0-9]", year_raw_data)
-                if match:
-                    year_data = match.group()
-                    years_rev_ninc_eps.append(int(year_data))
-            else:
+            if year_raw_data is None:
                 years_rev_ninc_eps.append(int(prefillna))
+            elif match := re.search("20[0-9][0-9]", year_raw_data):
+                year_data = match.group()
+                years_rev_ninc_eps.append(int(year_data))
         if len(years_rev_ninc_eps) == max:
             return years_rev_ninc_eps
 
@@ -536,14 +506,9 @@ def get_fcf(soup_fcf):
                 fcf_raw_years = tag.string
                 if fcf_raw_years is None:
                     years_fcf.append(int(prefillna))
-                else:
-                    match = re.search("20[0-9][0-9]", fcf_raw_years)
-                    if match:
-                        fcf_year_data = match.group()
-                        years_fcf.append(int(fcf_year_data))
-        if len(years_fcf) == max:
-            pass
-
+                elif match := re.search("20[0-9][0-9]", fcf_raw_years):
+                    fcf_year_data = match.group()
+                    years_fcf.append(int(fcf_year_data))
         debug("FCF", fcf_master, years_fcf, fcf_denom_master)
 
         fcf, fcf_df, fcf_rn1 = check_growth_rate(
@@ -587,10 +552,7 @@ def get_bvps(soup_bvps):
     bvps_years_pat = re.compile("[0-9]{2}")
     if bvps_years_data is not None and len(bvps_years_data) > 0:
         for year in bvps_years_data[-5:]:
-            # year will break w/html \'s, use year.string
-            # just get the last 5 values
-            matched_bvps_year = bvps_years_pat.search(year.string)
-            if matched_bvps_year:
+            if matched_bvps_year := bvps_years_pat.search(year.string):
                 bvps_year = "20" + matched_bvps_year.group()
                 years_bvps.append(int(bvps_year))
     else:
@@ -618,8 +580,7 @@ def get_roic(soup_roic):
         # ROIC is just one value. Leave as NavString
     except AttributeError as e:
         print("No Roic data found")
-        roic = False
-        return roic
+        return False
     else:
         roic = roic_data.string
         print(stock, "had", roic, "ROIC")
@@ -642,13 +603,11 @@ def get_ni_ttm(soup_ni_ttm):
 def get_pe_ttm(soup_pe_ttm):
     """ Get Trailing TTM for PE """
     web_patt = re.compile("P/E\s+\(TTM\).*?:.*?[0-9]{1,9}?\.[0-9]{0,2}", re.DOTALL)
-    pe_data_tag = soup_pe_ttm.find("th", text=web_patt)
-    if pe_data_tag:
+    if pe_data_tag := soup_pe_ttm.find("th", text=web_patt):
         pe_data = pe_data_tag.string
         local_patt = re.compile("(-?[0-9]{1,9}?\.[0-9]{0,2})")
-        pe_ttm_match = local_patt.search(pe_data)
-        if pe_ttm_match:
-            pe_ttm = pe_ttm_match.group(1)
+        if pe_ttm_match := local_patt.search(pe_data):
+            pe_ttm = pe_ttm_match[1]
             print(stock, "has", pe_ttm, "PE")
             return pe_ttm
     else:
@@ -747,7 +706,7 @@ def check_rn1(rev_rn1, net_inc_rn1, eps_rn1, fcf_rn1, bvp_rn1, roic, pe_ttm):
     """ Are all the Big 4, 4 years of compounded growth rate at least 10%? """
     """ Is the PE within our current acceptable range?                     """
     mylist = [rev_rn1, net_inc_rn1, eps_rn1, fcf_rn1, bvp_rn1, pe_ttm]
-    if any(x == "NA" for x in mylist):
+    if "NA" in mylist:
         return
     mylist = [float(x.rstrip("%")) for x in mylist]
     if all(x >= 10 for x in mylist):
@@ -777,88 +736,83 @@ def plot_or_not(
     fcf_master,
 ):
     """ Bokeh Plotting """
-    if plot:
-        if not os.path.exists(plot_dir):
-            os.makedirs(plot_dir)
-        if (
-            (not roic)
-            and (not revenue)
-            and (not net_inc)
-            and (not bvps)
-            and (not eps)
-            and (not fcf)
-        ):
-            print("No data - plot will not be generated")
-            print("")
-            sys.exit(0)
-        else:
-            stock = stock.upper()
-            print("Plotting details for", stock)
-            print("")
-            output_file("data/" + stock + ".html", title=stock + " Financials")
+    if not plot:
+        return
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    if roic or revenue or net_inc or bvps or eps or fcf:
+        stock = stock.upper()
+        print("Plotting details for", stock)
+        print("")
+        output_file("data/" + stock + ".html", title=stock + " Financials")
 
-            plot_net_inc = figure(
-                plot_width=400,
-                plot_height=400,
-                title=stock + " Net Income",
-                x_axis_label="Years",
-                y_axis_label="Net Income",
-            )
-            plot_net_inc.line(
-                years_rev_ninc_eps, net_inc_master, legend="Millions", line_width=2
-            )
+        plot_net_inc = figure(
+            plot_width=400,
+            plot_height=400,
+            title=stock + " Net Income",
+            x_axis_label="Years",
+            y_axis_label="Net Income",
+        )
+        plot_net_inc.line(
+            years_rev_ninc_eps, net_inc_master, legend="Millions", line_width=2
+        )
 
-            plot_rev = figure(
-                plot_width=400,
-                plot_height=400,
-                title=stock + " Revenue",
-                x_axis_label="Years",
-                y_axis_label="Revenue",
-            )
-            plot_rev.line(
-                years_rev_ninc_eps, revenue_master, legend="Millions", line_width=2
-            )
+        plot_rev = figure(
+            plot_width=400,
+            plot_height=400,
+            title=stock + " Revenue",
+            x_axis_label="Years",
+            y_axis_label="Revenue",
+        )
+        plot_rev.line(
+            years_rev_ninc_eps, revenue_master, legend="Millions", line_width=2
+        )
 
-            plot_eps = figure(
-                plot_width=400,
-                plot_height=400,
-                title=stock + " EPS",
-                x_axis_label="Years",
-                y_axis_label="EPS",
-            )
-            plot_eps.line(
-                years_rev_ninc_eps, eps_master, legend="Dollars per Share", line_width=2
-            )
+        plot_eps = figure(
+            plot_width=400,
+            plot_height=400,
+            title=stock + " EPS",
+            x_axis_label="Years",
+            y_axis_label="EPS",
+        )
+        plot_eps.line(
+            years_rev_ninc_eps, eps_master, legend="Dollars per Share", line_width=2
+        )
 
-            plot_bvps = figure(
-                plot_width=400,
-                plot_height=400,
-                title=stock + " BVPS",
-                x_axis_label="Years",
-                y_axis_label="BVPS",
-            )
-            plot_bvps.line(
-                years_bvps, bvps_master, legend="Book Value per Share", line_width=2
-            )
+        plot_bvps = figure(
+            plot_width=400,
+            plot_height=400,
+            title=stock + " BVPS",
+            x_axis_label="Years",
+            y_axis_label="BVPS",
+        )
+        plot_bvps.line(
+            years_bvps, bvps_master, legend="Book Value per Share", line_width=2
+        )
 
-            plot_fcf = figure(
-                plot_width=400,
-                plot_height=400,
-                title=stock + " Free Cash Flow",
-                x_axis_label="Years",
-                y_axis_label="Free Cash Flow",
-            )
-            plot_fcf.line(years_fcf, fcf_master, legend="Millions", line_width=2)
+        plot_fcf = figure(
+            plot_width=400,
+            plot_height=400,
+            title=stock + " Free Cash Flow",
+            x_axis_label="Years",
+            y_axis_label="Free Cash Flow",
+        )
+        plot_fcf.line(years_fcf, fcf_master, legend="Millions", line_width=2)
 
-            plot_roic = figure(plot_width=400, plot_height=400, title=stock + " Roic")
-            plot_roic.line([1, 2, 3, 4, 5], [1, 2, 3, 4, 5], legend=roic)
+        plot_roic = figure(plot_width=400, plot_height=400, title=stock + " Roic")
+        plot_roic.line([1, 2, 3, 4, 5], [1, 2, 3, 4, 5], legend=roic)
 
-            p = gridplot(
-                [[plot_rev, plot_net_inc, plot_eps], [plot_bvps, plot_fcf, plot_roic]]
-            )
-            save(p)
-            if popup_browser_plot:
-                show(p)
+        p = gridplot(
+            [[plot_rev, plot_net_inc, plot_eps], [plot_bvps, plot_fcf, plot_roic]]
+        )
+        save(p)
+        if popup_browser_plot:
+            show(p)
+
+    else:
+        print("No data - plot will not be generated")
+        print("")
+        sys.exit(0)
 
 
 def main():
